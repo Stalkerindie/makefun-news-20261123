@@ -33,6 +33,7 @@ PAPER = (246, 241, 230)
 BLACK = (20, 20, 20)
 CRIMSON = (178, 34, 34)
 MUTED = (90, 90, 90)
+FRAME_WIDTH = 2    # stroke of the picture frames and the masthead rule
 
 # Each story: where its picture sits inside the 1920x1280 collage
 # (a few pixels are trimmed off every side to dodge the white seams),
@@ -103,7 +104,7 @@ def paint_masthead(pen, faces):
              font=faces["masthead"], fill=BLACK, anchor="ma")
     pen.text((PAGE_W // 2, 64), "—  THE WORLD IN ONE PICTURE  —",
              font=faces["kicker"], fill=CRIMSON, anchor="ma")
-    pen.line([(EDGE, 92), (PAGE_W - EDGE, 92)], fill=BLACK, width=2)
+    pen.line([(EDGE, 92), (PAGE_W - EDGE, 92)], fill=BLACK, width=FRAME_WIDTH)
 
 
 def paint_tile(pen, sheet, collage, story, left, top, faces, line_pitch):
@@ -112,7 +113,7 @@ def paint_tile(pen, sheet, collage, story, left, top, faces, line_pitch):
         collage.crop(story["box"]), (TILE_W, TILE_H), Image.LANCZOS)
     sheet.paste(picture, (left, top))
     pen.rectangle([left, top, left + TILE_W - 1, top + TILE_H - 1],
-                  outline=BLACK, width=2)
+                  outline=BLACK, width=FRAME_WIDTH)
 
     text_top = top + TILE_H + TEXT_GAP
     title_lines = split_lines(pen, story["title"], faces["title"], TILE_W)
@@ -161,7 +162,7 @@ def build_page():
         collage.crop(wide["box"]), (WIDE_W, WIDE_H), Image.LANCZOS)
     sheet.paste(picture, (EDGE, wide_top))
     pen.rectangle([EDGE, wide_top, EDGE + WIDE_W - 1, wide_top + WIDE_H - 1],
-                  outline=BLACK, width=2)
+                  outline=BLACK, width=FRAME_WIDTH)
     pen.text((EDGE, wide_top + WIDE_H + 6),
              wide["title"], font=faces["title"], fill=BLACK)
     pen.text((EDGE, wide_top + WIDE_H + 6 + 30),
