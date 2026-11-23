@@ -1,101 +1,183 @@
 #!/usr/bin/env python3
-"""Compose the final 1024x1024 entry from the generated 5-panel collage.
+"""Build the newspaper-style entry picture for Monday 23 November 2026.
 
-Adds a newspaper masthead naming the day and legible PIL-rendered
-headlines + captions under each panel (no text comes from the image
-generator). Deterministic: same input -> same output bytes.
+Takes the five-panel AI collage produced earlier and lays it out as a
+front page: a masthead up top, four square-ish stories in a 2x2 grid,
+one wide story along the bottom, and a small footer line. Every bit of
+text on the page is drawn here with PIL, so the wording stays crisp
+instead of coming out of the image generator.
+
+Running this script twice over the same collage gives byte-identical
+output: nothing here reads the clock, rolls dice, or touches the net.
 """
+
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-SRC = "assets/media-generation-news-20261123-collage-0-1f0454d1-fea3-467d-b644-163ec5437c1d.webp"
-OUT = "assets/entry.jpg"
+ROOT = Path(__file__).resolve().parent
+COLLAGE = ROOT / "assets" / "media-generation-news-20261123-collage-0-1f0454d1-fea3-467d-b644-163ec5437c1d.webp"
+RESULT = ROOT / "assets" / "entry.jpg"
 
-# Panel crops in the 1920x1280 collage (small insets avoid the white gutters).
-PANELS = [
-    ((6, 6, 954, 433), "COP31 COLLAPSES — NO CLIMATE DEAL",
-     "Antalya: EU rejects a draft with no fossil fuels mentioned."),
-    ((966, 6, 1914, 433), "GULF WAR WIDENS — 25 TANKERS HIT",
-     "25 tankers hit near Hormuz; Houthis strike Riyadh again."),
-    ((6, 452, 954, 863), "RUSSIAN MISSILES LAND IN POLAND",
-     "NATO jets scramble; Warsaw calls it a deliberate provocation."),
-    ((966, 452, 1914, 863), "FACTORY FIRE — 50 MISSING IN JAVA",
-     "Banten candy plant: 3 dead, 7 body bags; search goes on."),
-    ((6, 873, 1914, 1274), "BEPICOLOMBO REACHES MERCURY",
-     "After 8 years, the ESA/JAXA craft enters orbit — but a thruster glitch cut its burn short."),
+FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
+
+PAGE_W, PAGE_H = 1024, 1024
+EDGE = 24            # outer margin on the left and right
+GUTTER = 24          # gap between the two columns
+TILE_W, TILE_H = 476, 220
+WIDE_W, WIDE_H = 976, 168
+TEXT_GAP = 5         # space between a picture and its headline
+ROW_STEP = TILE_H + 80 + 14   # picture + text block + gap to next row
+
+PAPER = (246, 241, 230)
+BLACK = (20, 20, 20)
+CRIMSON = (178, 34, 34)
+MUTED = (90, 90, 90)
+
+# Each story: where its picture sits inside the 1920x1280 collage
+# (a few pixels are trimmed off every side to dodge the white seams),
+# plus the headline and one-line caption printed underneath it.
+STORIES = [
+    {
+        "box": (6, 6, 954, 433),
+        "title": "COP31 COLLAPSES — NO CLIMATE DEAL",
+        "blurb": "Antalya: EU rejects a draft with no fossil fuels mentioned.",
+    },
+    {
+        "box": (966, 6, 1914, 433),
+        "title": "GULF WAR WIDENS — 25 TANKERS HIT",
+        "blurb": "25 tankers hit near Hormuz; Houthis strike Riyadh again.",
+    },
+    {
+        "box": (6, 452, 954, 863),
+        "title": "RUSSIAN MISSILES LAND IN POLAND",
+        "blurb": "NATO jets scramble; Warsaw calls it a deliberate provocation.",
+    },
+    {
+        "box": (966, 452, 1914, 863),
+        "title": "FACTORY FIRE — 50 MISSING IN JAVA",
+        "blurb": "Banten candy plant: 3 dead, 7 body bags; search goes on.",
+    },
+    {
+        "box": (6, 873, 1914, 1274),
+        "title": "BEPICOLOMBO REACHES MERCURY",
+        "blurb": "After 8 years, the ESA/JAXA craft enters orbit — but a thruster glitch cut its burn short.",
+    },
 ]
 
-W = H = 1024
-CREAM = (246, 241, 230)
-INK = (20, 20, 20)
-RED = (178, 34, 34)
-GREY = (90, 90, 90)
 
-src = Image.open(SRC).convert("RGB")
-canvas = Image.new("RGB", (W, H), CREAM)
-d = ImageDraw.Draw(canvas)
+def load_typefaces():
+    """Return the five DejaVu faces this page needs, at their sizes."""
+    def face(name, size):
+        return ImageFont.truetype(str(FONT_DIR / name), size)
 
-serif_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", 46)
-sans_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
-head_b = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
-cap = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-foot = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
+    return {
+        "masthead": face("DejaVuSerif-Bold.ttf", 46),
+        "kicker": face("DejaVuSans-Bold.ttf", 16),
+        "title": face("DejaVuSans-Bold.ttf", 26),
+        "blurb": face("DejaVuSans.ttf", 14),
+        "footer": face("DejaVuSans.ttf", 15),
+    }
 
 
-def wrap(text, font, max_w):
+def split_lines(pen, text, face, width):
+    """Greedy word wrap: pack as many words per line as fit in `width`."""
     words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        t = (cur + " " + w).strip()
-        if d.textlength(t, font=font) <= max_w:
-            cur = t
+    lines = []
+    current = ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if pen.textlength(trial, font=face) <= width:
+            current = trial
         else:
-            lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-# Masthead
-d.text((512, 12), "MONDAY 23 NOVEMBER 2026", font=serif_b, fill=INK, anchor="ma")
-d.text((512, 64), "—  THE WORLD IN ONE PICTURE  —", font=sans_b, fill=RED, anchor="ma")
-d.line([(24, 92), (1000, 92)], fill=INK, width=2)
+def paint_masthead(pen, faces):
+    """Date line, red kicker, and the rule underneath them."""
+    pen.text((PAGE_W // 2, 12), "MONDAY 23 NOVEMBER 2026",
+             font=faces["masthead"], fill=BLACK, anchor="ma")
+    pen.text((PAGE_W // 2, 64), "—  THE WORLD IN ONE PICTURE  —",
+             font=faces["kicker"], fill=CRIMSON, anchor="ma")
+    pen.line([(EDGE, 92), (PAGE_W - EDGE, 92)], fill=BLACK, width=2)
 
-# Headline line pitch: the 26pt bold font's true line height
-# (ascent + descent = 32px). The old hard-coded 29px pitch was shorter
-# than the font, so a 2nd-line descender ("JAVA") collided with the
-# caption drawn at a fixed 2-line offset (glyph bottom 698 vs caption
-# top 697: a 1px overlap, visible as a strike-through on "JAVA").
-HEAD_PITCH = head_b.getmetrics()[0] + head_b.getmetrics()[1]
 
-# Layout: two rows of two panels (476 x 220 + headline/caption block),
-# then one wide panel (976 x 168 + headline/caption), then footer.
-PW, PH = 476, 220
-y = 100
-for i, (crop, headline, caption) in enumerate(PANELS[:4]):
-    col, row = i % 2, i // 2
-    x = 24 + col * (PW + 24)
-    yy = y + row * (PH + 80 + 14)
-    panel = ImageOps.fit(src.crop(crop), (PW, PH), Image.LANCZOS)
-    canvas.paste(panel, (x, yy))
-    d.rectangle([x, yy, x + PW - 1, yy + PH - 1], outline=INK, width=2)
-    hl = wrap(headline, head_b, PW)
-    assert len(hl) <= 2, (headline, hl)
-    for j, line in enumerate(hl):
-        d.text((x, yy + PH + 5 + j * HEAD_PITCH), line, font=head_b, fill=INK)
-    cl = wrap(caption, cap, PW)
-    assert len(cl) <= 1, (caption, cl)
-    d.text((x, yy + PH + 5 + 2 * HEAD_PITCH), cl[0], font=cap, fill=INK)
+def paint_tile(pen, sheet, collage, story, left, top, faces, line_pitch):
+    """One grid story: picture with a frame, then headline + caption."""
+    picture = ImageOps.fit(
+        collage.crop(story["box"]), (TILE_W, TILE_H), Image.LANCZOS)
+    sheet.paste(picture, (left, top))
+    pen.rectangle([left, top, left + TILE_W - 1, top + TILE_H - 1],
+                  outline=BLACK, width=2)
 
-y2 = y + 2 * (PH + 80 + 14)  # 100 + 628 = 728
-panel = ImageOps.fit(src.crop(PANELS[4][0]), (976, 168), Image.LANCZOS)
-canvas.paste(panel, (24, y2))
-d.rectangle([24, y2, 999, y2 + 167], outline=INK, width=2)
-d.text((24, y2 + 174), PANELS[4][1], font=head_b, fill=INK)
-d.text((24, y2 + 174 + 30), PANELS[4][2], font=cap, fill=INK)
-d.text((512, 992),
-       "Five stories from Monday 23 November 2026  ·  Antalya  ·  Hormuz  ·  Poland  ·  Indonesia  ·  Mercury",
-       font=foot, fill=GREY, anchor="ma")
+    text_top = top + TILE_H + TEXT_GAP
+    title_lines = split_lines(pen, story["title"], faces["title"], TILE_W)
+    if len(title_lines) > 2:
+        raise ValueError(f"headline spills past two lines: {story['title']!r}")
+    for offset, line in enumerate(title_lines):
+        pen.text((left, text_top + offset * line_pitch),
+                 line, font=faces["title"], fill=BLACK)
 
-canvas.save(OUT, "JPEG", quality=88, optimize=True)
-print("wrote", OUT)
+    # The caption always starts exactly two title-lines below the
+    # headline, so a two-line headline can never touch it. With the
+    # real line pitch (ascent + descent of the 26pt face = 32px) the
+    # gap between a second-line descender and the caption is 4px.
+    caption_lines = split_lines(pen, story["blurb"], faces["blurb"], TILE_W)
+    if len(caption_lines) > 1:
+        raise ValueError(f"caption spills past one line: {story['blurb']!r}")
+    pen.text((left, text_top + 2 * line_pitch),
+             caption_lines[0], font=faces["blurb"], fill=BLACK)
+
+
+def build_page():
+    """Compose the whole 1024x1024 page and return it."""
+    collage = Image.open(COLLAGE).convert("RGB")
+    sheet = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
+    pen = ImageDraw.Draw(sheet)
+    faces = load_typefaces()
+
+    # True line pitch of the 26pt bold face, measured from the font
+    # itself rather than guessed: ascent plus descent.
+    ascent, descent = faces["title"].getmetrics()
+    line_pitch = ascent + descent
+
+    paint_masthead(pen, faces)
+
+    top_row = 100
+    for index, story in enumerate(STORIES[:4]):
+        column = index % 2
+        row = index // 2
+        left = EDGE + column * (TILE_W + GUTTER)
+        top = top_row + row * ROW_STEP
+        paint_tile(pen, sheet, collage, story, left, top, faces, line_pitch)
+
+    wide_top = top_row + 2 * ROW_STEP
+    wide = STORIES[4]
+    picture = ImageOps.fit(
+        collage.crop(wide["box"]), (WIDE_W, WIDE_H), Image.LANCZOS)
+    sheet.paste(picture, (EDGE, wide_top))
+    pen.rectangle([EDGE, wide_top, EDGE + WIDE_W - 1, wide_top + WIDE_H - 1],
+                  outline=BLACK, width=2)
+    pen.text((EDGE, wide_top + WIDE_H + 6),
+             wide["title"], font=faces["title"], fill=BLACK)
+    pen.text((EDGE, wide_top + WIDE_H + 6 + 30),
+             wide["blurb"], font=faces["blurb"], fill=BLACK)
+
+    pen.text((PAGE_W // 2, 992),
+             "Five stories from Monday 23 November 2026  ·  Antalya  ·  Hormuz  ·  Poland  ·  Indonesia  ·  Mercury",
+             font=faces["footer"], fill=MUTED, anchor="ma")
+    return sheet
+
+
+def main():
+    page = build_page()
+    page.save(RESULT, "JPEG", quality=88, optimize=True)
+    print("wrote", RESULT)
+
+
+if __name__ == "__main__":
+    main()
