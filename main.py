@@ -1,29 +1,38 @@
 #!/usr/bin/env python3
-"""make.fun bounty entry: Sum up 23 November's world news in one image.
+"""Entry point for the make.fun news-image bounty (23 November 2026).
 
-Writes the entry image to $MAKEFUN_OUTPUT_DIR/entry.png (default /output).
-Deterministic: it copies the bundled JPEG byte-for-byte. No network,
-no randomness, no timestamps in the output. The file is named entry.png
-but holds JPEG bytes, which the competition rules explicitly allow
-("The file is a PNG or a JPEG, told apart by its first bytes; the name
-stays `entry.png` either way").
+The judges run this file and expect the finished picture to appear at
+$MAKEFUN_OUTPUT_DIR/entry.png (or /output/entry.png when that variable
+is unset). The picture itself is bundled with the entry under
+assets/entry.jpg, so all this script does is hand over those exact
+bytes under the name the rules ask for.
+
+Nothing here is random, time-dependent, or networked: the same input
+always produces the same output file, byte for byte. The file keeps
+the name entry.png even though the bytes inside are JPEG — the rules
+say the format is read from the first bytes, not the extension.
 """
 
 import os
-import shutil
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-SOURCE = HERE / "assets" / "entry.jpg"
+ENTRY_DIR = Path(__file__).resolve().parent
+BUNDLED_PICTURE = ENTRY_DIR / "assets" / "entry.jpg"
 
 
-def main() -> None:
-    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dest = out_dir / "entry.png"
-    shutil.copyfile(SOURCE, dest)
-    print(f"wrote {dest} ({dest.stat().st_size} bytes)")
+def output_path():
+    """Where the finished picture goes, honouring the platform variable."""
+    folder = Path(os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output")
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / "entry.png"
+
+
+def run():
+    picture_bytes = BUNDLED_PICTURE.read_bytes()
+    target = output_path()
+    target.write_bytes(picture_bytes)
+    print(f"wrote {target} ({len(picture_bytes)} bytes)")
 
 
 if __name__ == "__main__":
-    main()
+    run()
