@@ -61,6 +61,13 @@ d.text((512, 12), "MONDAY 23 NOVEMBER 2026", font=serif_b, fill=INK, anchor="ma"
 d.text((512, 64), "—  THE WORLD IN ONE PICTURE  —", font=sans_b, fill=RED, anchor="ma")
 d.line([(24, 92), (1000, 92)], fill=INK, width=2)
 
+# Headline line pitch: the 26pt bold font's true line height
+# (ascent + descent = 32px). The old hard-coded 29px pitch was shorter
+# than the font, so a 2nd-line descender ("JAVA") collided with the
+# caption drawn at a fixed 2-line offset (glyph bottom 698 vs caption
+# top 697: a 1px overlap, visible as a strike-through on "JAVA").
+HEAD_PITCH = head_b.getmetrics()[0] + head_b.getmetrics()[1]
+
 # Layout: two rows of two panels (476 x 220 + headline/caption block),
 # then one wide panel (976 x 168 + headline/caption), then footer.
 PW, PH = 476, 220
@@ -75,10 +82,10 @@ for i, (crop, headline, caption) in enumerate(PANELS[:4]):
     hl = wrap(headline, head_b, PW)
     assert len(hl) <= 2, (headline, hl)
     for j, line in enumerate(hl):
-        d.text((x, yy + PH + 5 + j * 29), line, font=head_b, fill=INK)
+        d.text((x, yy + PH + 5 + j * HEAD_PITCH), line, font=head_b, fill=INK)
     cl = wrap(caption, cap, PW)
     assert len(cl) <= 1, (caption, cl)
-    d.text((x, yy + PH + 5 + 2 * 29), cl[0], font=cap, fill=INK)
+    d.text((x, yy + PH + 5 + 2 * HEAD_PITCH), cl[0], font=cap, fill=INK)
 
 y2 = y + 2 * (PH + 80 + 14)  # 100 + 628 = 728
 panel = ImageOps.fit(src.crop(PANELS[4][0]), (976, 168), Image.LANCZOS)
